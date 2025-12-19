@@ -3,6 +3,8 @@ import { quickHostDiscovery, fastPortScan } from '../scanners/nmap.js';
 import { scanLocalNetwork } from '../scanners/arpScan.js';
 import { parseNmapOutput } from '../parsers/nmapParser.js';
 import { parseArpOutput } from '../parsers/arpParser.js';
+import os from 'os';
+import { execSync } from 'child_process';
 
 /**
  * In-memory device storage
@@ -18,6 +20,33 @@ let discoveredDevices = new Map();
  */
 export async function discoverDevices(network, iface = 'eth0') {
     console.log(`Starting device discovery for network: ${network}`);
+    
+    // Handle 'auto' interface selection
+    if (iface === 'auto' || !iface) {
+        const platform = os.platform();
+        
+        if (platform === 'win32') {
+            // Windows: Set to null so arp.js uses --localnet without interface
+            iface = null;
+            console.log('Windows detected: Using auto-detect mode');
+        } else {
+            // Linux/Mac: Try to detect default interface
+            try {
+                const output = execSync('ip route | grep default', { encoding: 'utf-8' });
+                const match = output.match(/dev (\S+)/);
+                if (match) {
+                    iface = match[1];
+                    console.log(`Auto-detected interface: ${iface}`);
+                } else {
+                    iface = 'eth0';
+                    console.log('Could not auto-detect, using eth0');
+                }
+            } catch (error) {
+                iface = 'eth0';
+                console.log('Could not auto-detect interface, using eth0');
+            }
+        }
+    }
     
     const results = {
         devices: [],

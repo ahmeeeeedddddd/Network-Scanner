@@ -16,6 +16,15 @@ import {
     emitError
 } from '../socket/socketHandlers.js';
 
+import { 
+    logScanStart, 
+    logDeviceFound, 
+    logPortScanStart, 
+    logPortsFound, 
+    logScanComplete, 
+    logError 
+} from '../utils/logger.js';
+
 const router = express.Router();
 
 /**
@@ -23,8 +32,10 @@ const router = express.Router();
  * Trigger network scan (Person 1's function + Person 3's Socket.io)
  */
 router.post('/scan/network', async (req, res) => {
+    const startTime = Date.now();
+    
     try {
-        const { network, interface: iface = 'eth0' } = req.body;
+        const { network, interface: iface = 'eth0', scanPorts = true } = req.body;
 
         if (!network) {
             return res.status(400).json({
@@ -33,7 +44,8 @@ router.post('/scan/network', async (req, res) => {
             });
         }
 
-        console.log(`API: Starting network scan for ${network}`);
+        // Enhanced logging
+        logScanStart(network, iface);
         
         // Emit scan start
         emitScanProgress({ percentage: 0, message: 'Starting network scan...' });
@@ -41,13 +53,64 @@ router.post('/scan/network', async (req, res) => {
         // Call Person 1's scanning function
         const results = await discoverDevices(network, iface);
 
-        // Emit devices to all connected clients via Socket.io
-        emitDevicesUpdated(results.devices);
+        console.log(`✅ Discovered ${results.devices.length} devices`);
         
-        // Emit scan complete
+        // Log each discovered device
+        results.devices.forEach((device, i) => {
+            logDeviceFound(device, i + 1, results.devices.length);
+        });
+        
+        // Emit devices discovered
+        emitDevicesUpdated(results.devices);
+        emitScanProgress({ 
+            percentage: 50, 
+            message: `Found ${results.devices.length} devices. Scanning ports...` 
+        });
+
+        // AUTO PORT SCAN - Scan ports for each discovered device
+        if (scanPorts && results.devices.length > 0) {
+            console.log(`\n🔍 Starting port scans for ${results.devices.length} devices...\n`);
+            
+            for (let i = 0; i < results.devices.length; i++) {
+                const device = results.devices[i];
+                const progress = 50 + ((i + 1) / results.devices.length * 50);
+                
+                try {
+                    logPortScanStart(device.ip);
+                    
+                    emitScanProgress({ 
+                        percentage: Math.round(progress), 
+                        message: `Scanning ports: ${device.ip} (${i + 1}/${results.devices.length})` 
+                    });
+                    
+                    const updatedDevice = await scanDevicePorts(device.ip);
+                    
+                    if (updatedDevice) {
+                        logPortsFound(device.ip, updatedDevice.ports || []);
+                    }
+                    
+                    // Small delay to avoid overwhelming the network
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (error) {
+                    console.error(`  ❌ Port scan failed for ${device.ip}:`, error.message);
+                }
+            }
+        }
+        
+        // Get updated devices with port information
+        const updatedDevices = getAllDevices();
+        
+        // Calculate duration
+        const duration = Date.now() - startTime;
+        
+        // Enhanced completion logging
+        logScanComplete(updatedDevices.length, duration);
+        
+        // Emit final results
+        emitDevicesUpdated(updatedDevices);
         emitScanComplete({
             success: true,
-            deviceCount: results.devices.length,
+            deviceCount: updatedDevices.length,
             network: network,
             errors: results.errors
         });
@@ -56,16 +119,18 @@ router.post('/scan/network', async (req, res) => {
         res.json({
             success: true,
             data: {
-                devices: results.devices,
+                devices: updatedDevices,
                 errors: results.errors,
                 summary: {
-                    devicesFound: results.devices.length,
-                    scanErrors: results.errors.length
+                    devicesFound: updatedDevices.length,
+                    scanErrors: results.errors.length,
+                    portsScanned: scanPorts,
+                    duration: duration
                 }
             }
         });
     } catch (error) {
-        console.error('Network scan error:', error);
+        logError('Network scan failed', error);
         emitError({ message: error.message });
         res.status(500).json({
             success: false,

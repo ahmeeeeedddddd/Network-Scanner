@@ -193,21 +193,36 @@ async function fetchInitialData() {
 
 async function triggerNetworkScan() {
     try {
-        const network = prompt('Enter network to scan (e.g., 192.168.1.0/24):');
+        // Auto-detect or suggest network
+        const suggestedNetwork = '192.168.1.0/24'; // Based on your ipconfig
+        
+        const network = prompt(
+            'Enter network to scan:\n\n' +
+            'Examples:\n' +
+            '  192.168.1.0/24 (scans 192.168.1.1-254)\n' +
+            '  192.168.1.0/25 (scans 192.168.1.1-126)\n' +
+            '  10.0.0.0/24\n\n' +
+            'Suggested for your network:',
+            suggestedNetwork
+        );
+        
         if (!network) return;
         
-        showNotification('Starting network scan...', 'info');
+        showNotification('Starting network scan... This may take 1-2 minutes', 'info');
         
         const response = await fetch('/api/scan/network', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ network })
+            body: JSON.stringify({ 
+                network,
+                interface: 'auto' // Let backend auto-detect
+            })
         });
         
         const data = await response.json();
         
         if (data.success) {
-            showNotification('Network scan initiated', 'success');
+            showNotification(`Scan initiated for ${network}`, 'success');
         } else {
             showNotification(`Scan failed: ${data.error}`, 'error');
         }
