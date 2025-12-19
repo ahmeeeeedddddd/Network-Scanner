@@ -471,6 +471,21 @@ background-clip: text;
     box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
 }
 
+#connection-status {
+    display: inline-block;
+    font-size: 0.875rem;
+}
+
+#connection-status.connected {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+#connection-status.disconnected {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
 @media (max-width: 768px) {
     .main-grid {
         grid-template-columns: 1fr;

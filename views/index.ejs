@@ -16,6 +16,9 @@
                     <h1>🛡️ Network Security Monitor</h1>
                     <p>✨ Real-time device tracking and threat detection ✨</p>
                 </div>
+                <div id="connection-status" style="padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600;">
+                    Connecting...
+                </div>
                 <div class="header-buttons">
                     <button class="btn btn-alerts" onclick="openAlertsModal()">
                         🔔 Alerts (<span id="alertCount">3</span>)
@@ -26,6 +29,21 @@
                 </div>
             </div>
         </header>
+
+        <div id="scan-progress-container" style="display: none; margin: 1rem 0; background: white; border-radius: 0.5rem; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="margin-bottom: 0.5rem;">
+                <span id="scan-progress-text" style="font-weight: 600; color: #475569;">Scanning...</span>
+            </div>
+            <div style="background: #e5e7eb; border-radius: 9999px; overflow: hidden; height: 0.5rem;">
+                <div id="scan-progress-bar" 
+                    style="background: linear-gradient(90deg, #14b8a6, #0ea5e9); height: 100%; width: 0%; transition: width 0.3s ease;"
+                    role="progressbar" 
+                    aria-valuenow="0" 
+                    aria-valuemin="0" 
+                    aria-valuemax="100">
+                </div>
+            </div>
+        </div>
 
         <!-- Stats Grid -->
         <div class="stats-grid">

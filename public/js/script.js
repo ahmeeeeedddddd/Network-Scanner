@@ -1,19 +1,32 @@
-// ADD THIS TO THE TOP OF YOUR EXISTING public/js/script.js
+// public/js/script.js - Updated for Real Backend Integration
+// =================================================================
+// REAL-TIME DATA - NO MORE MOCK DATA
+// =================================================================
+
 // Initialize Socket.io connection
 const socket = io();
 
-// Connection status handlers
+// Global state - will be populated by real backend data
+let devices = [];
+let alerts = [];
+let whitelist = [];
+let networkStats = {};
+let charts = {};
+
+// =================================================================
+// SOCKET.IO EVENT LISTENERS - Real-time updates from backend
+// =================================================================
+
 socket.on('connect', () => {
-    console.log('Connected to server via Socket.io');
+    console.log('✅ Connected to server via Socket.io');
     updateConnectionStatus(true);
     
     // Request initial data when connected
-    socket.emit('request-devices');
-    socket.emit('request-stats');
+    fetchInitialData();
 });
 
 socket.on('disconnect', () => {
-    console.log('Disconnected from server');
+    console.log('❌ Disconnected from server');
     updateConnectionStatus(false);
 });
 
@@ -22,43 +35,49 @@ socket.on('connect_error', (error) => {
     updateConnectionStatus(false);
 });
 
-// Listen for devices updates
+// Listen for devices updates (Person 1's data)
 socket.on('devices-updated', (data) => {
-    console.log('Received devices update:', data.count, 'devices');
+    console.log('📡 Received devices update:', data.length, 'devices');
     
-    // Call your existing renderDevices function (from Person 4's code)
-    if (typeof renderDevices === 'function') {
-        renderDevices(data.devices);
+    // Update global devices array
+    if (Array.isArray(data)) {
+        devices = data;
+    } else if (data.devices) {
+        devices = data.devices;
     }
     
-    // Update device count in UI
-    updateDeviceCount(data.count);
+    // Re-render UI with real data
+    renderDevices();
+    renderPorts();
+    updateDeviceCount(devices.length);
+    updateCharts();
 });
 
 // Listen for new device discoveries
 socket.on('new-device', (data) => {
-    console.log('New device discovered:', data.device.ip);
+    console.log('🆕 New device discovered:', data.ip);
     
-    // Add visual notification
-    showNotification(`New device found: ${data.device.ip}`, 'info');
+    const device = data.device || data;
     
-    // If you have a function to add a single device to the UI
-    if (typeof addDeviceToUI === 'function') {
-        addDeviceToUI(data.device);
+    // Add to devices array if not already present
+    if (!devices.find(d => d.ip === device.ip)) {
+        devices.push(device);
+        renderDevices();
+        updateDeviceCount(devices.length);
     }
+    
+    showNotification(`New device found: ${device.ip}`, 'success');
 });
 
 // Listen for scan progress
 socket.on('scan-progress', (data) => {
-    console.log('Scan progress:', data.percentage + '%', data.message);
-    
-    // Update progress bar if it exists
+    console.log('⏳ Scan progress:', data.percentage + '%', data.message);
     updateScanProgress(data.percentage, data.message);
 });
 
 // Listen for scan completion
 socket.on('scan-complete', (data) => {
-    console.log('Scan complete:', data);
+    console.log('✅ Scan complete:', data);
     
     if (data.success) {
         showNotification(`Scan complete: ${data.deviceCount} devices found`, 'success');
@@ -66,7 +85,6 @@ socket.on('scan-complete', (data) => {
         showNotification(`Scan failed: ${data.error}`, 'error');
     }
     
-    // Reset progress bar
     updateScanProgress(100, 'Complete');
     setTimeout(() => {
         updateScanProgress(0, '');
@@ -75,48 +93,179 @@ socket.on('scan-complete', (data) => {
 
 // Listen for network statistics updates
 socket.on('stats-updated', (data) => {
-    console.log('Stats updated:', data.stats);
+    console.log('📊 Stats updated:', data);
     
-    // Call your existing function to render stats (from Person 4's code)
-    if (typeof updateNetworkStats === 'function') {
-        updateNetworkStats(data.stats);
-    }
+    networkStats = data.stats || data;
+    updateNetworkStats(networkStats);
 });
 
-// Listen for device status changes
-socket.on('device-status-changed', (data) => {
-    console.log('Device status changed:', data.device);
+// Listen for security alerts (Person 2's data)
+socket.on('security-alert', (alert) => {
+    console.log('🚨 Security alert received:', alert);
     
-    // Update specific device in the UI
-    if (typeof updateDeviceStatus === 'function') {
-        updateDeviceStatus(data.device);
+    // Add alert to alerts array
+    alerts.unshift(alert); // Add to beginning
+    
+    // Limit to 50 alerts
+    if (alerts.length > 50) {
+        alerts = alerts.slice(0, 50);
     }
+    
+    renderAlerts();
+    showNotification(`Security Alert: ${alert.attacks?.[0]?.type || 'Threat detected'} on ${alert.ip}`, 'error');
+});
+
+// Listen for threat detection
+socket.on('threat-detected', (threat) => {
+    console.log('⚠️ Threat detected:', threat);
+    showNotification(`Threat: ${threat.type} on ${threat.ip}`, 'warning');
 });
 
 // Listen for errors
 socket.on('scan-error', (data) => {
-    console.error('Scan error:', data.error);
+    console.error('❌ Scan error:', data.error);
     showNotification(`Error: ${data.error}`, 'error');
 });
 
-// Helper function to update connection status indicator
+socket.on('error', (data) => {
+    console.error('❌ Error:', data);
+    showNotification(`Error: ${data.message || data.error}`, 'error');
+});
+
+// =================================================================
+// API FUNCTIONS - Fetch data from backend
+// =================================================================
+
+async function fetchInitialData() {
+    try {
+        // Fetch devices
+        const devicesResponse = await fetch('/api/devices');
+        const devicesData = await devicesResponse.json();
+        
+        if (devicesData.success && devicesData.data) {
+            devices = devicesData.data.devices || [];
+            renderDevices();
+            updateDeviceCount(devices.length);
+        }
+        
+        // Fetch stats
+        const statsResponse = await fetch('/api/stats');
+        const statsData = await statsResponse.json();
+        
+        if (statsData.success && statsData.data) {
+            networkStats = statsData.data;
+            updateNetworkStats(networkStats);
+        }
+        
+        // Fetch alerts (if Person 2's endpoint is available)
+        try {
+            const alertsResponse = await fetch('/api/monitoring/alerts');
+            const alertsData = await alertsResponse.json();
+            
+            if (alertsData.success && alertsData.data) {
+                alerts = alertsData.data.alerts || [];
+                renderAlerts();
+            }
+        } catch (error) {
+            console.log('Alerts endpoint not available yet');
+        }
+        
+        // Fetch whitelist (if available)
+        try {
+            const whitelistResponse = await fetch('/api/monitoring/whitelist');
+            const whitelistData = await whitelistResponse.json();
+            
+            if (whitelistData.success && whitelistData.data) {
+                whitelist = whitelistData.data.whitelist || [];
+            }
+        } catch (error) {
+            console.log('Whitelist endpoint not available yet');
+        }
+        
+        console.log('✅ Initial data loaded');
+        updateCharts();
+        
+    } catch (error) {
+        console.error('Error fetching initial data:', error);
+        showNotification('Failed to load initial data', 'error');
+    }
+}
+
+async function triggerNetworkScan() {
+    try {
+        const network = prompt('Enter network to scan (e.g., 192.168.1.0/24):');
+        if (!network) return;
+        
+        showNotification('Starting network scan...', 'info');
+        
+        const response = await fetch('/api/scan/network', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ network })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showNotification('Network scan initiated', 'success');
+        } else {
+            showNotification(`Scan failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error triggering scan:', error);
+        showNotification('Failed to start scan', 'error');
+    }
+}
+
+async function scanDevicePorts(ip) {
+    try {
+        showNotification(`Scanning ports for ${ip}...`, 'info');
+        
+        const response = await fetch('/api/scan/ports', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showNotification(`Port scan complete for ${ip}`, 'success');
+            
+            // Update the device in our array
+            const index = devices.findIndex(d => d.ip === ip);
+            if (index !== -1) {
+                devices[index] = data.data;
+                renderDevices();
+            }
+        } else {
+            showNotification(`Port scan failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error scanning ports:', error);
+        showNotification('Port scan failed', 'error');
+    }
+}
+
+// =================================================================
+// UI HELPER FUNCTIONS
+// =================================================================
+
 function updateConnectionStatus(isConnected) {
     const statusElement = document.getElementById('connection-status');
     if (statusElement) {
         statusElement.className = isConnected ? 'connected' : 'disconnected';
-        statusElement.textContent = isConnected ? 'Connected' : 'Disconnected';
+        statusElement.textContent = isConnected ? '🟢 Connected' : '🔴 Disconnected';
     }
 }
 
-// Helper function to update device count
 function updateDeviceCount(count) {
-    const countElement = document.getElementById('device-count');
+    const countElement = document.querySelector('.stat-card:first-child .stat-value');
     if (countElement) {
         countElement.textContent = count;
     }
 }
 
-// Helper function to update scan progress
 function updateScanProgress(percentage, message) {
     const progressBar = document.getElementById('scan-progress-bar');
     const progressText = document.getElementById('scan-progress-text');
@@ -129,114 +278,198 @@ function updateScanProgress(percentage, message) {
     if (progressText) {
         progressText.textContent = message;
     }
+    
+    // Show/hide progress container
+    const progressContainer = document.getElementById('scan-progress-container');
+    if (progressContainer) {
+        progressContainer.style.display = percentage > 0 && percentage < 100 ? 'block' : 'none';
+    }
 }
 
-// Helper function to show notifications
 function showNotification(message, type = 'info') {
-    // If Person 4 has a notification function, use it
-    // Otherwise, use simple console log or implement basic notification
     console.log(`[${type.toUpperCase()}] ${message}`);
     
-    // Optional: Create a simple toast notification
+    // Create toast notification
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: ${type === 'error' ? '#ef4444' : type === 'success' ? '#22c55e' : type === 'warning' ? '#fbbf24' : '#14b8a6'};
+        color: white;
+        padding: 1rem 1.5rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        z-index: 10000;
+        animation: slideIn 0.3s ease-out;
+        max-width: 300px;
+    `;
     notification.textContent = message;
+    
     document.body.appendChild(notification);
     
     setTimeout(() => {
-        notification.remove();
+        notification.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => notification.remove(), 300);
     }, 3000);
 }
 
-// REPLACE YOUR MOCK DATA CALLS WITH REAL SOCKET.IO DATA
-// For example, if you have fetchDevices() that uses mock data:
-/*
-// OLD CODE (remove this):
-async function fetchDevices() {
-    const mockDevices = [...];
-    renderDevices(mockDevices);
+function updateNetworkStats(stats) {
+    // Update stat cards
+    const statCards = document.querySelectorAll('.stat-card .stat-value');
+    
+    if (statCards[0]) statCards[0].textContent = stats.totalDevices || devices.length;
+    if (statCards[1]) statCards[1].textContent = stats.onlineDevices || devices.filter(d => d.status === 'up').length;
+    if (statCards[2]) statCards[2].textContent = stats.offlineDevices || devices.filter(d => d.status === 'down').length;
+    if (statCards[3]) statCards[3].textContent = stats.threatsDetected || alerts.length;
 }
 
-// NEW CODE: Data comes automatically via Socket.io
-// Just make sure renderDevices() is ready to receive real data
-// The socket.on('devices-updated') handler above will call it
-*/
+// =================================================================
+// RENDERING FUNCTIONS
+// =================================================================
 
-
-// Data
-let devices = [
-    { id: 1, ip: '192.168.1.100', hostname: 'WorkstationA', status: 'online', ports: [22, 80, 443], threat: 'none', lastSeen: new Date() },
-    { id: 2, ip: '192.168.1.101', hostname: 'ServerB', status: 'online', ports: [22, 3306, 8080], threat: 'low', lastSeen: new Date() },
-    { id: 3, ip: '192.168.1.102', hostname: 'PrinterC', status: 'offline', ports: [9100], threat: 'none', lastSeen: new Date(Date.now() - 300000) },
-    { id: 4, ip: '192.168.1.103', hostname: 'RouterD', status: 'online', ports: [80, 443, 8443], threat: 'high', lastSeen: new Date() }
-];
-
-let alerts = [
-    { id: 1, device: 'RouterD', message: 'Unusual port scanning activity detected', severity: 'high', time: new Date() },
-    { id: 2, device: 'ServerB', message: 'Multiple failed login attempts', severity: 'medium', time: new Date(Date.now() - 120000) },
-    { id: 3, device: 'WorkstationA', message: 'New service detected on port 8888', severity: 'low', time: new Date(Date.now() - 300000) }
-];
-
-let whitelist = [
-    { id: 1, ip: '192.168.1.100', hostname: 'WorkstationA', addedBy: 'admin', date: '2024-12-01' },
-    { id: 2, ip: '192.168.1.50', hostname: 'LaptopE', addedBy: 'admin', date: '2024-12-02' }
-];
-
-// Format timestamp
 function formatTimestamp(date) {
+    if (!date) return 'Unknown';
+    
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
     const now = new Date();
-    const diff = Math.floor((now - date) / 1000);
+    const diff = Math.floor((now - dateObj) / 1000);
+    
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return date.toLocaleDateString();
+    return dateObj.toLocaleDateString();
 }
 
-// Render devices
+function getThreatLevel(device) {
+    // Determine threat level based on alerts and suspicious services
+    if (device.detectedAttacks && device.detectedAttacks.length > 0) {
+        const hasHighSeverity = device.detectedAttacks.some(a => a.severity === 'high');
+        return hasHighSeverity ? 'high' : 'medium';
+    }
+    
+    if (device.suspiciousServices && device.suspiciousServices.length > 0) {
+        return 'medium';
+    }
+    
+    if (device.isBlacklisted) {
+        return 'high';
+    }
+    
+    return 'safe';
+}
+
 function renderDevices() {
     const container = document.getElementById('devicesList');
-    container.innerHTML = devices.map(device => `
-        <div class="device-card" onclick="openDeviceModal(${device.id})">
-            <div class="device-header">
-                <div class="device-info">
-                    <div class="status-dot status-${device.status}"></div>
-                    <div>
-                        <div style="font-weight: bold; color: #475569;">${device.hostname}</div>
-                        <div style="font-size: 0.875rem; color: #14b8a6;">${device.ip}</div>
+    
+    if (!container) return;
+    
+    if (devices.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 2rem; color: #6b7280;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+                <p>No devices discovered yet</p>
+                <button onclick="triggerNetworkScan()" class="btn" style="margin-top: 1rem;">
+                    Start Network Scan
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = devices.map(device => {
+        const status = device.status === 'up' ? 'online' : 'offline';
+        const threatLevel = getThreatLevel(device);
+        const ports = device.ports || [];
+        const portsList = Array.isArray(ports) 
+            ? ports.slice(0, 5).map(p => typeof p === 'object' ? p.port || p.portid : p).filter(Boolean)
+            : [];
+        
+        return `
+            <div class="device-card" onclick="openDeviceModal('${device.ip}')">
+                <div class="device-header">
+                    <div class="device-info">
+                        <div class="status-dot status-${status}"></div>
+                        <div>
+                            <div style="font-weight: bold; color: #475569;">
+                                ${device.hostname || device.ip}
+                            </div>
+                            <div style="font-size: 0.875rem; color: #14b8a6;">${device.ip}</div>
+                        </div>
                     </div>
+                    <div class="threat-badge threat-${threatLevel}">${threatLevel.toUpperCase()}</div>
                 </div>
-                <div class="threat-badge threat-${device.threat}">${device.threat.toUpperCase()}</div>
-            </div>
-            <div class="device-footer">
-                <div>
-                    <span style="color: #475569; font-weight: 600;">Ports:</span>
-                    <span style="color: #14b8a6; font-weight: 600;">${device.ports.join(', ')}</span>
+                <div class="device-footer">
+                    <div>
+                        <span style="color: #475569; font-weight: 600;">Ports:</span>
+                        <span style="color: #14b8a6; font-weight: 600;">
+                            ${portsList.length > 0 ? portsList.join(', ') : 'None'}
+                            ${ports.length > 5 ? ` +${ports.length - 5} more` : ''}
+                        </span>
+                    </div>
+                    <span style="color: #6b7280;">${formatTimestamp(device.lastSeen || device.timestamp)}</span>
                 </div>
-                <span style="color: #6b7280;">${formatTimestamp(device.lastSeen)}</span>
             </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
-// Render alerts
 function renderAlerts() {
     const container = document.getElementById('alertsList');
-    container.innerHTML = alerts.slice(0, 3).map(alert => `
-        <div class="alert-card alert-${alert.severity}">
-            <div style="font-weight: bold; color: #1e293b; margin-bottom: 0.5rem;">${alert.device}</div>
-            <div style="font-size: 0.875rem; color: #475569; margin-bottom: 0.5rem;">${alert.message}</div>
-            <div style="font-size: 0.75rem; color: #6b7280;">${formatTimestamp(alert.time)}</div>
-        </div>
-    `).join('');
-    document.getElementById('alertCount').textContent = alerts.length;
+    const countElement = document.getElementById('alertCount');
+    
+    if (!container) return;
+    
+    if (countElement) {
+        countElement.textContent = alerts.length;
+    }
+    
+    if (alerts.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 1.5rem; color: #6b7280;">
+                <div style="font-size: 2rem; margin-bottom: 0.5rem;">✅</div>
+                <p>No alerts</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = alerts.slice(0, 3).map(alert => {
+        const severity = alert.severity || 'low';
+        const message = alert.attacks?.[0]?.description || alert.message || 'Security concern detected';
+        
+        return `
+            <div class="alert-card alert-${severity}">
+                <div style="font-weight: bold; color: #1e293b; margin-bottom: 0.5rem;">
+                    ${alert.ip || 'Unknown Device'}
+                </div>
+                <div style="font-size: 0.875rem; color: #475569; margin-bottom: 0.5rem;">
+                    ${message}
+                </div>
+                <div style="font-size: 0.75rem; color: #6b7280;">
+                    ${formatTimestamp(alert.timestamp)}
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
-// Render ports
 function renderPorts() {
-    const ports = [22, 80, 443, 3306, 8080, 8443, 9100, 8888];
+    const commonPorts = [21, 22, 23, 80, 443, 3306, 3389, 8080];
     const container = document.getElementById('portGrid');
-    container.innerHTML = ports.map(port => {
-        const isOpen = devices.some(d => d.ports.includes(port) && d.status === 'online');
+    
+    if (!container) return;
+    
+    container.innerHTML = commonPorts.map(port => {
+        const isOpen = devices.some(d => {
+            const ports = d.ports || [];
+            return ports.some(p => {
+                const portNum = typeof p === 'object' ? (p.port || p.portid) : p;
+                return portNum == port;
+            }) && d.status === 'up';
+        });
+        
         return `
             <div class="port-card ${isOpen ? 'port-open' : 'port-closed'}">
                 <div class="port-number">${port}</div>
@@ -246,7 +479,92 @@ function renderPorts() {
     }).join('');
 }
 
-// Modal functions
+// =================================================================
+// MODAL FUNCTIONS
+// =================================================================
+
+function openDeviceModal(ip) {
+    const device = devices.find(d => d.ip === ip);
+    if (!device) return;
+    
+    const body = document.getElementById('deviceModalBody');
+    const ports = device.ports || [];
+    const portsList = Array.isArray(ports) 
+        ? ports.map(p => typeof p === 'object' ? p.port || p.portid : p).filter(Boolean)
+        : [];
+    
+    const threatLevel = getThreatLevel(device);
+    const status = device.status === 'up' ? 'online' : 'offline';
+    
+    body.innerHTML = `
+        <div class="detail-card">
+            <div class="detail-label">Hostname</div>
+            <div class="detail-value">${device.hostname || 'Unknown'}</div>
+        </div>
+        <div class="detail-card" style="border-color: #5eead4;">
+            <div class="detail-label">IP Address</div>
+            <div class="detail-value" style="color: #14b8a6;">${device.ip}</div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">MAC Address</div>
+            <div class="detail-value">${device.mac || 'Unknown'}</div>
+        </div>
+        <div class="detail-card" style="border-color: #5eead4;">
+            <div class="detail-label">Status</div>
+            <div class="detail-value" style="color: ${status === 'online' ? '#22c55e' : '#9ca3af'};">
+                ${status.toUpperCase()}
+            </div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">Open Ports (${portsList.length})</div>
+            <div class="port-tags">
+                ${portsList.length > 0 
+                    ? portsList.map(port => `<span class="port-tag">${port}</span>`).join('')
+                    : '<span style="color: #6b7280;">No open ports</span>'}
+            </div>
+        </div>
+        <div class="detail-card" style="border-color: #5eead4;">
+            <div class="detail-label">Threat Level</div>
+            <div style="margin-top: 0.5rem;">
+                <span class="threat-badge threat-${threatLevel}">${threatLevel.toUpperCase()}</span>
+            </div>
+        </div>
+        ${device.detectedAttacks && device.detectedAttacks.length > 0 ? `
+            <div class="detail-card">
+                <div class="detail-label">Detected Threats</div>
+                <div style="margin-top: 0.5rem;">
+                    ${device.detectedAttacks.map(attack => `
+                        <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: #fef2f2; border-radius: 0.25rem;">
+                            <div style="font-weight: 600; color: #ef4444;">${attack.type}</div>
+                            <div style="font-size: 0.875rem; color: #6b7280;">${attack.description}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        ` : ''}
+        <div class="detail-card" style="border-color: #5eead4;">
+            <div class="detail-label">Last Seen</div>
+            <div style="font-size: 1.1rem; font-weight: 600; color: #475569; margin-top: 0.25rem;">
+                ${formatTimestamp(device.lastSeen || device.timestamp)}
+            </div>
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+            <button onclick="scanDevicePorts('${device.ip}')" class="btn" style="flex: 1;">
+                🔍 Rescan Ports
+            </button>
+            <button onclick="closeDeviceModal()" class="btn" style="flex: 1; background: #6b7280;">
+                Close
+            </button>
+        </div>
+    `;
+    
+    document.getElementById('deviceModal').classList.add('active');
+}
+
+function closeDeviceModal() {
+    document.getElementById('deviceModal').classList.remove('active');
+}
+
 function openAlertsModal() {
     const modal = document.getElementById('alertsModal');
     const body = document.getElementById('alertsModalBody');
@@ -262,24 +580,39 @@ function openAlertsModal() {
     } else {
         body.innerHTML = `
             <div style="margin-bottom: 1rem;">
-                ${alerts.map((alert, index) => `
-                    <div class="alert-card alert-${alert.severity}" style="margin-bottom: 1rem;">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <span style="font-size: 1.75rem;">⚠️</span>
-                                <div>
-                                    <div style="font-weight: bold; font-size: 1.125rem; color: #1e293b;">${alert.device}</div>
-                                    <span class="threat-badge threat-${alert.severity}" style="font-size: 0.75rem; display: inline-block; margin-top: 0.25rem;">
-                                        ${alert.severity.toUpperCase()}
-                                    </span>
+                ${alerts.map((alert, index) => {
+                    const severity = alert.severity || 'low';
+                    const attackType = alert.attacks?.[0]?.type || 'Security Alert';
+                    const description = alert.attacks?.[0]?.description || alert.message || 'Threat detected';
+                    
+                    return `
+                        <div class="alert-card alert-${severity}" style="margin-bottom: 1rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
+                                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                    <span style="font-size: 1.75rem;">⚠️</span>
+                                    <div>
+                                        <div style="font-weight: bold; font-size: 1.125rem; color: #1e293b;">
+                                            ${alert.ip || 'Unknown Device'}
+                                        </div>
+                                        <span class="threat-badge threat-${severity}" style="font-size: 0.75rem; display: inline-block; margin-top: 0.25rem;">
+                                            ${severity.toUpperCase()}
+                                        </span>
+                                    </div>
                                 </div>
+                                <button onclick="dismissAlert(${index})" style="background: none; border: none; color: #6b7280; cursor: pointer; font-weight: bold; font-size: 1.125rem;">✕</button>
                             </div>
-                            <button onclick="dismissAlert(${index})" style="background: none; border: none; color: #6b7280; cursor: pointer; font-weight: bold; font-size: 1.125rem;">✕</button>
+                            <div style="color: #1e293b; margin-bottom: 0.5rem; margin-left: 2.5rem; font-weight: 600;">
+                                ${attackType}
+                            </div>
+                            <div style="color: #475569; margin-bottom: 0.75rem; margin-left: 2.5rem;">
+                                ${description}
+                            </div>
+                            <div style="font-size: 0.75rem; color: #6b7280; margin-left: 2.5rem;">
+                                ⏰ ${formatTimestamp(alert.timestamp)}
+                            </div>
                         </div>
-                        <div style="color: #1e293b; margin-bottom: 0.75rem; margin-left: 2.5rem;">${alert.message}</div>
-                        <div style="font-size: 0.75rem; color: #6b7280; margin-left: 2.5rem;">⏰ ${formatTimestamp(alert.time)}</div>
-                    </div>
-                `).join('')}
+                    `;
+                }).join('')}
             </div>
             <button class="btn-full" onclick="clearAllAlerts()">Clear All Alerts</button>
         `;
@@ -314,86 +647,87 @@ function closeWhitelistModal() {
 
 function renderWhitelist() {
     const container = document.getElementById('whitelistEntries');
+    
+    if (whitelist.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 2rem; color: #6b7280;">
+                <p>No whitelisted devices</p>
+            </div>
+        `;
+        return;
+    }
+    
     container.innerHTML = whitelist.map(entry => `
         <div class="whitelist-entry">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
                 <span style="font-size: 1.5rem;">🔓</span>
                 <div>
-                    <div style="font-weight: bold; color: #475569;">${entry.hostname}</div>
+                    <div style="font-weight: bold; color: #475569;">${entry.hostname || entry.ip}</div>
                     <div style="font-size: 0.875rem; color: #14b8a6;">${entry.ip}</div>
-                    <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem;">
-                        Added by ${entry.addedBy} on ${entry.date}
-                    </div>
+                    ${entry.addedBy ? `
+                        <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem;">
+                            Added by ${entry.addedBy} ${entry.date ? `on ${entry.date}` : ''}
+                        </div>
+                    ` : ''}
                 </div>
             </div>
-            <button class="btn-remove" onclick="removeFromWhitelist(${entry.id})">Remove</button>
+            <button class="btn-remove" onclick="removeFromWhitelist('${entry.ip}')">Remove</button>
         </div>
     `).join('');
 }
 
-function addToWhitelist() {
+async function addToWhitelist() {
     const ip = document.getElementById('whitelistIP').value;
     const hostname = document.getElementById('whitelistHostname').value;
-    if (ip && hostname) {
-        whitelist.push({
-            id: whitelist.length + 1,
-            ip, hostname,
-            addedBy: 'admin',
-            date: new Date().toISOString().split('T')[0]
+    
+    if (!ip) {
+        showNotification('Please enter an IP address', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/monitoring/whitelist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip, hostname })
         });
-        document.getElementById('whitelistIP').value = '';
-        document.getElementById('whitelistHostname').value = '';
-        renderWhitelist();
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            whitelist.push({ ip, hostname });
+            document.getElementById('whitelistIP').value = '';
+            document.getElementById('whitelistHostname').value = '';
+            renderWhitelist();
+            showNotification('Device added to whitelist', 'success');
+        } else {
+            showNotification('Failed to add to whitelist', 'error');
+        }
+    } catch (error) {
+        console.error('Error adding to whitelist:', error);
+        showNotification('Failed to add to whitelist', 'error');
     }
 }
 
-function removeFromWhitelist(id) {
-    whitelist = whitelist.filter(entry => entry.id !== id);
-    renderWhitelist();
-}
-
-function openDeviceModal(id) {
-    const device = devices.find(d => d.id === id);
-    const body = document.getElementById('deviceModalBody');
-    body.innerHTML = `
-        <div class="detail-card">
-            <div class="detail-label">Hostname</div>
-            <div class="detail-value">${device.hostname}</div>
-        </div>
-        <div class="detail-card" style="border-color: #5eead4;">
-            <div class="detail-label">IP Address</div>
-            <div class="detail-value" style="color: #14b8a6;">${device.ip}</div>
-        </div>
-        <div class="detail-card">
-            <div class="detail-label">Status</div>
-            <div class="detail-value" style="color: ${device.status === 'online' ? '#22c55e' : '#9ca3af'};">
-                ${device.status.toUpperCase()}
-            </div>
-        </div>
-        <div class="detail-card" style="border-color: #5eead4;">
-            <div class="detail-label">Open Ports</div>
-            <div class="port-tags">
-                ${device.ports.map(port => `<span class="port-tag">${port}</span>`).join('')}
-            </div>
-        </div>
-        <div class="detail-card">
-            <div class="detail-label">Threat Level</div>
-            <div style="margin-top: 0.5rem;">
-                <span class="threat-badge threat-${device.threat}">${device.threat.toUpperCase()}</span>
-            </div>
-        </div>
-        <div class="detail-card" style="border-color: #5eead4;">
-            <div class="detail-label">Last Seen</div>
-            <div style="font-size: 1.1rem; font-weight: 600; color: #475569; margin-top: 0.25rem;">
-                ${device.lastSeen.toLocaleString()}
-            </div>
-        </div>
-    `;
-    document.getElementById('deviceModal').classList.add('active');
-}
-
-function closeDeviceModal() {
-    document.getElementById('deviceModal').classList.remove('active');
+async function removeFromWhitelist(ip) {
+    try {
+        const response = await fetch(`/api/monitoring/whitelist/${ip}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            whitelist = whitelist.filter(entry => entry.ip !== ip);
+            renderWhitelist();
+            showNotification('Device removed from whitelist', 'success');
+        } else {
+            showNotification('Failed to remove from whitelist', 'error');
+        }
+    } catch (error) {
+        console.error('Error removing from whitelist:', error);
+        showNotification('Failed to remove from whitelist', 'error');
+    }
 }
 
 function closeModalOnOutside(event, modalId) {
@@ -402,120 +736,193 @@ function closeModalOnOutside(event, modalId) {
     }
 }
 
-// Update real-time data
-setInterval(() => {
-    devices = devices.map(device => ({
-        ...device,
-        lastSeen: device.status === 'online' ? new Date() : device.lastSeen
-    }));
-    renderDevices();
-}, 5000);
+// =================================================================
+// CHARTS - Dynamic data from backend
+// =================================================================
 
-// Initialize Charts
-function initCharts() {
-    // Activity Chart
-    new Chart(document.getElementById('activityChart'), {
+function updateCharts() {
+    updateActivityChart();
+    updatePortChart();
+    updateStatusChart();
+    updateThreatChart();
+}
+
+function updateActivityChart() {
+    const ctx = document.getElementById('activityChart');
+    if (!ctx) return;
+    
+    // Destroy existing chart
+    if (charts.activity) {
+        charts.activity.destroy();
+    }
+    
+    // Generate labels (last 7 time points)
+    const labels = [];
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+        const time = new Date(now - i * 10 * 60 * 1000);
+        labels.push(time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+    }
+    
+    // Count active devices and threats over time (simulated for now)
+    const activeDevices = devices.filter(d => d.status === 'up').length;
+    const activeData = new Array(7).fill(0).map((_, i) => 
+        Math.max(0, activeDevices - Math.floor(Math.random() * 2))
+    );
+    
+    const threatData = new Array(7).fill(0).map(() => 
+        alerts.length > 0 ? Math.floor(Math.random() * alerts.length) : 0
+    );
+    
+    charts.activity = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: ['10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00'],
+            labels,
             datasets: [{
                 label: 'Active Devices',
-                data: [2, 3, 4, 3, 4, 4, 4],
+                data: activeData,
                 borderColor: '#14b8a6',
                 backgroundColor: 'rgba(20, 184, 166, 0.1)',
                 fill: true,
                 tension: 0.4
             }, {
                 label: 'Detected Threats',
-                data: [0, 1, 1, 2, 2, 1, 2],
+                data: threatData,
                 borderColor: '#0ea5e9',
                 backgroundColor: 'rgba(14, 165, 233, 0.1)',
                 fill: true,
                 tension: 0.4
             }]
         },
-        options: { 
-            responsive: true, 
+        options: {
+            responsive: true,
             maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: true
-                }
-            }
+            plugins: { legend: { display: true } }
         }
     });
+}
 
-    // Port Chart
-    new Chart(document.getElementById('portChart'), {
+function updatePortChart() {
+    const ctx = document.getElementById('portChart');
+    if (!ctx) return;
+    
+    if (charts.port) {
+        charts.port.destroy();
+    }
+    
+    const commonPorts = [22, 80, 443, 3306, 8080, 8443, 9100];
+    const portCounts = commonPorts.map(port => {
+        return devices.filter(d => {
+            const ports = d.ports || [];
+            return ports.some(p => {
+                const portNum = typeof p === 'object' ? (p.port || p.portid) : p;
+                return portNum == port;
+            });
+        }).length;
+    });
+    
+    charts.port = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: ['22', '80', '443', '3306', '8080', '8443', '9100'],
+            labels: commonPorts.map(p => String(p)),
             datasets: [{
                 label: 'Devices Using Port',
-                data: [2, 2, 2, 1, 1, 1, 1],
+                data: portCounts,
                 backgroundColor: '#14b8a6'
             }]
         },
-        options: { 
-            responsive: true, 
+        options: {
+            responsive: true,
             maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: true
-                }
-            }
+            plugins: { legend: { display: true } }
         }
     });
+}
 
-    // Status Pie Chart
-    new Chart(document.getElementById('statusChart'), {
+function updateStatusChart() {
+    const ctx = document.getElementById('statusChart');
+    if (!ctx) return;
+    
+    if (charts.status) {
+        charts.status.destroy();
+    }
+    
+    const onlineCount = devices.filter(d => d.status === 'up').length;
+    const offlineCount = devices.filter(d => d.status === 'down').length;
+    
+    charts.status = new Chart(ctx, {
         type: 'pie',
         data: {
             labels: ['Online', 'Offline'],
             datasets: [{
-                data: [3, 1],
+                data: [onlineCount, offlineCount],
                 backgroundColor: ['#14b8a6', '#0ea5e9']
             }]
         },
-        options: { 
-            responsive: true, 
+        options: {
+            responsive: true,
             maintainAspectRatio: true,
             plugins: {
-                legend: {
-                    display: true,
-                    position: 'bottom'
-                }
-            }
-        }
-    });
-
-    // Threat Pie Chart
-    new Chart(document.getElementById('threatChart'), {
-        type: 'pie',
-        data: {
-            labels: ['Safe', 'Low Risk', 'High Risk'],
-            datasets: [{
-                data: [2, 1, 1],
-                backgroundColor: ['#14b8a6', '#fbbf24', '#ef4444']
-            }]
-        },
-        options: { 
-            responsive: true, 
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'bottom'
-                }
+                legend: { display: true, position: 'bottom' }
             }
         }
     });
 }
 
-// Initialize on load
+function updateThreatChart() {
+    const ctx = document.getElementById('threatChart');
+    if (!ctx) return;
+    
+    if (charts.threat) {
+        charts.threat.destroy();
+    }
+    
+    const safeCount = devices.filter(d => getThreatLevel(d) === 'safe').length;
+    const mediumCount = devices.filter(d => getThreatLevel(d) === 'medium').length;
+    const highCount = devices.filter(d => getThreatLevel(d) === 'high').length;
+    
+    charts.threat = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: ['Safe', 'Medium Risk', 'High Risk'],
+            datasets: [{
+                data: [safeCount, mediumCount, highCount],
+                backgroundColor: ['#14b8a6', '#fbbf24', '#ef4444']
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { display: true, position: 'bottom' }
+            }
+        }
+    });
+}
+
+// =================================================================
+// INITIALIZATION
+// =================================================================
+
 window.onload = function() {
-    renderDevices();
-    renderAlerts();
-    renderPorts();
-    initCharts();
+    console.log('🚀 Network Security Monitor - Initializing...');
+    
+    // Charts will be initialized after data loads
+    setTimeout(() => {
+        updateCharts();
+    }, 1000);
+    
+    // Add CSS for animations
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+    `;
+    document.head.appendChild(style);
 };
