@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Security Monitor</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>🛡️ Network Security Monitor</h1>
+                    <p>✨ Real-time device tracking and threat detection ✨</p>
+                </div>
+                <div class="header-buttons">
+                    <button class="btn btn-alerts" onclick="openAlertsModal()">
+                        🔔 Alerts (<span id="alertCount">3</span>)
+                    </button>
+                    <button class="btn btn-whitelist" onclick="openWhitelistModal()">
+                        ⚙️ Whitelist
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div>
+                    <h3>Total Devices</h3>
+<div class="stat-value" 
+     style="
+        background: linear-gradient(135deg, #14b8a6, #0ea5e9);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+     ">
+    4
+</div>
+                </div>
+                <div class="stat-icon">🖥️</div>
+            </div>
+            <div class="stat-card" style="border-color: #5eead4;">
+                <div>
+                    <h3>Online</h3>
+                    <div class="stat-value" style="color: #22c55e;">3</div>
+                </div>
+                <div class="stat-icon">✅</div>
+            </div>
+            <div class="stat-card">
+                <div>
+                    <h3>Offline</h3>
+                    <div class="stat-value" style="color: #9ca3af;">1</div>
+                </div>
+                <div class="stat-icon">📡</div>
+            </div>
+            <div class="stat-card" style="border-color: #5eead4;">
+                <div>
+                    <h3>Active Threats</h3>
+                    <div class="stat-value" style="color: #ef4444;">2</div>
+                </div>
+                <div class="stat-icon">⚠️</div>
+            </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h2>📊 Network Activity Over Time</h2>
+                <canvas id="activityChart"></canvas>
+            </div>
+            <div class="chart-card" style="border-color: #5eead4;">
+                <h2>📈 Port Usage Statistics</h2>
+                <canvas id="portChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h2>📊 Device Status Distribution</h2>
+                <canvas id="statusChart"></canvas>
+            </div>
+            <div class="chart-card" style="border-color: #5eead4;">
+                <h2>🛡️ Threat Level Overview</h2>
+                <canvas id="threatChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-grid">
+            <div class="content-card">
+                <h2>💖 Discovered Devices</h2>
+                <div id="devicesList"></div>
+            </div>
+
+            <div class="content-card" style="border-color: #5eead4;">
+                <h2>🔔 Recent Alerts</h2>
+                <div id="alertsList"></div>
+            </div>
+        </div>
+
+        <!-- Port Status -->
+        <div class="content-card">
+            <h2>✨ Port Status Overview</h2>
+            <div class="port-grid" id="portGrid"></div>
+        </div>
+    </div>
+
+    <!-- Alerts Modal -->
+    <div id="alertsModal" class="modal" onclick="closeModalOnOutside(event, 'alertsModal')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>🔔 Alert Notifications</h2>
+                <button class="modal-close" onclick="closeAlertsModal()">×</button>
+            </div>
+            <div id="alertsModalBody"></div>
+        </div>
+    </div>
+
+    <!-- Whitelist Modal -->
+    <div id="whitelistModal" class="modal" onclick="closeModalOnOutside(event, 'whitelistModal')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>💝 Whitelist Management</h2>
+                <button class="modal-close" onclick="closeWhitelistModal()">×</button>
+            </div>
+            <div class="whitelist-form">
+                <h3 style="margin-bottom: 0.75rem; font-weight: bold; color: #475569;">Add New Entry</h3>
+                <div class="form-grid">
+                    <input type="text" class="form-input" id="whitelistIP" placeholder="IP Address">
+                    <input type="text" class="form-input" id="whitelistHostname" placeholder="Hostname">
+                </div>
+                <button class="btn-full" onclick="addToWhitelist()">Add to Whitelist ✨</button>
+            </div>
+            <div id="whitelistEntries"></div>
+        </div>
+    </div>
+
+    <!-- Device Detail Modal -->
+    <div id="deviceModal" class="modal" onclick="closeModalOnOutside(event, 'deviceModal')">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>Device Details 💫</h2>
+                <button class="modal-close" onclick="closeDeviceModal()">x</button>
+            </div>
+            <div id="deviceModalBody"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <script src="/js/script.js"></script>
+</body>
+</html>
